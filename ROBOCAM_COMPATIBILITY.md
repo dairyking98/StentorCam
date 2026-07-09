@@ -2,13 +2,24 @@
 
 This document compares what RoboCam 3.1 actually produces today against
 what StentorCam's scripts actually expect, based on reading both repos'
-current code (not either repo's aspirational docs). It's an assessment,
-not a design — no integration code has been written yet. See
-`README.md` for StentorCam's own current-state architecture.
+current code (not either repo's aspirational docs). See `README.md` for
+StentorCam's own current-state architecture.
 
 Sources: RoboCam 3.1's `robocam/postprocess.py` and `PROJECT_STATE.md`
 (§§ 3–5, 8), read 2026-07-08; StentorCam's `stentTrack.py`, `multiTest.py`,
 `stentor_preprocess.ijm` as of the same date.
+
+**Update (2026-07-09):** the raw-`.npy` integration described as an open
+question below has since been implemented — `robocam_input.py` plus
+`--exp_dir` support in both `stentTrack.py` and `multiTest.py` — per the
+decisions and design in this repo's git history (branch
+`feature/robocam-exp-dir-support`). It reads `raw/*.npy` directly, always
+in preference to `images/`/`videos/` even when both exist, and
+batch-processes every well found. It has been manually verified against a
+synthetic fixture only, **not yet against a real RoboCam capture** — see
+the updated Open Questions below for what that leaves unconfirmed. The
+rest of this document (written before that work) is left as originally
+assessed except where noted, since its analysis is still accurate.
 
 ---
 
@@ -100,7 +111,7 @@ Key facts confirmed from the code (not just the docs):
 | RoboCam `videos/<well>_<ts>.mp4` → `stentTrack.py --video` / `multiTest.py --video` | **Likely works as-is.** Both scripts only need an OpenCV-readable mp4; RoboCam's is standard H.264 baseline. Not yet run end-to-end against a real RoboCam output file — this is the highest-value next check (see Open Questions). |
 | RoboCam `videos/<well>_<ts>_vfr.mkv` → either tracker | **Unverified.** VFR timing may or may not read back as evenly-spaced frames through `cv2.VideoCapture`; the mp4 (constant fps) is the safer bet of the two RoboCam video outputs. |
 | RoboCam `images/<well>/*.png` sequence → `stentor_preprocess.ijm` | **Confirmed broken as written** — filename mismatch (see above). Fiji's own "Import → Image Sequence" (used later in the macro) sorts by name and doesn't require the literal `frame0001.png`, but the macro's very first line does an explicit `open()` on that exact name before the sequence import runs. |
-| RoboCam raw `.npy` well-stacks (pre-postprocessing) → anything in StentorCam | **No path exists.** Nothing in StentorCam reads `.npy`; only `postprocess.py`'s PNG/mp4 outputs are consumable at all today. |
+| RoboCam raw `.npy` well-stacks (pre-postprocessing) → `stentTrack.py --exp_dir` / `multiTest.py --exp_dir` | **Implemented** (2026-07-09) via `robocam_input.py`. Reads `raw/*.npy` directly — no dependency on `postprocess.py` having run — and batches every well found. Verified against a hand-built synthetic fixture (correct frame-count-ceiling handling, empty-well skip, CSV/overlay output); **not yet verified against a real RoboCam capture** (see Open Questions). Only the current stacked-array raw format is supported, not the legacy pre-2026-07-06 per-frame-file format. |
 | RoboCam `laser_events[]` / `fps_average` metadata → `full_data_plot.py` / `track_plot.py` | **Not read.** These scripts have no code path that opens a metadata JSON; the fixed 30fps/2700-frame/frames-900-1800 assumptions are independent of whatever RoboCam actually recorded for a given run. |
 | `stentTrack.py` / `multiTest.py` CSV output → `full_data_plot.py` / `track_plot.py` | **Already broken today, independent of RoboCam** — different CSV schemas (see README "Known gaps"). Relevant here because it means even a fully-compatible RoboCam→tracker path still dead-ends before reaching the plotting scripts. |
 
@@ -108,9 +119,14 @@ Key facts confirmed from the code (not just the docs):
 
 ## Open questions (not yet answered — needs a real RoboCam capture to test against)
 
-1. Has a RoboCam-produced `.mp4` actually been fed into `stentTrack.py` or
-   `multiTest.py` and run to completion? Nothing above is a substitute for
-   that concrete test.
+1. **Highest-value next check**: has a real RoboCam-produced experiment
+   directory actually been fed into `stentTrack.py --exp_dir` or
+   `multiTest.py --exp_dir` and run to completion? Only a synthetic
+   fixture has exercised this path so far — real sensor data may expose
+   debayering, bit-depth, or timing assumptions the fixture couldn't.
+   (The `--video`/mp4 path is no longer the primary integration target,
+   since `--exp_dir` always prefers `raw/*.npy` directly — but the mp4
+   path also remains untested against a real RoboCam-produced file.)
 2. Is the well boundary actually visible as a circle within the raw frame
    (making `--roi_r` directly useful), or does the camera's field of view
    already tightly match the well with no visible edge/background margin?
@@ -122,7 +138,11 @@ Key facts confirmed from the code (not just the docs):
    (and `laser_events[]`) from the sidecar metadata instead of hardcoding
    30fps/frame-900-1800, or is a fixed acquisition protocol enough of a
    guarantee that hardcoding is fine? This is a real design decision, not
-   answered by this document.
+   answered by this document. (`robocam_input.WellFrames` already carries
+   `fps`/`laser_events` through for a well loaded via `--exp_dir` — nothing
+   consumes them past that yet, since `full_data_plot.py`/`track_plot.py`
+   are out of scope for the `--exp_dir` work.)
 5. Multi-cell counts: does RoboCam record or plan to record how many cells
    were loaded per well anywhere in its metadata, which `multiTest.py
-   --n_cells` could consume directly?
+   --n_cells` could consume directly? (Currently `--n_cells` is a single
+   value applied identically to every well in a batch `--exp_dir` run.)
