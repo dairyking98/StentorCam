@@ -8,9 +8,32 @@ uploaded** — it is a snapshot for orientation, not a design spec. Nothing
 here has been reorganized or fixed yet; see the "Known gaps" section below
 for what's rough.
 
-There is no `requirements.txt`, `pyproject.toml`, environment file, or test
-suite in the repo yet — dependencies below are inferred from each script's
-imports.
+There is no `pyproject.toml`, environment file, or test suite in the repo
+yet. A `requirements.txt` and `setup.sh`/`run.sh` convenience scripts now
+exist (see "Setup" below); the dependency list in them is still inferred
+from each script's imports, not pinned to versions known to work.
+
+---
+
+## Setup
+
+```
+bash setup.sh          # creates .venv, installs requirements.txt, checks for ffmpeg
+source .venv/bin/activate
+bash run.sh <script.py> [args...]     # or just: python <script.py> [args...]
+```
+
+`setup.sh` does not install Fiji/ImageJ, TrackMate, or `ffmpeg` itself —
+`ffmpeg` must already be on `PATH` (`stentTrack.py` and `multiTest.py` both
+shell out to it to composite the overlay video; without it they will run
+tracking to completion and then fail at the final compositing step). Fiji
+is a separate GUI application only needed for `stentor_preprocess.ijm`, see
+that workflow below.
+
+There is no single "start" script — this repo is a set of independent CLI
+tools, not one long-running app — so `run.sh` is a thin wrapper that
+activates `.venv` and forwards its arguments to `python`. See "Usage" below
+for the exact invocation each script expects.
 
 ---
 
@@ -132,6 +155,132 @@ into the plotting scripts without a manual reformatting step.
 
 ---
 
+## Usage
+
+Concrete, current-state invocations — every flag actually accepted by each
+script's `argparse` block, not an aspirational interface. Run `bash setup.sh`
+first (see "Setup" above), then either `source .venv/bin/activate` and call
+`python <script>.py` directly, or prefix each command below with
+`bash run.sh `.
+
+### `stentTrack.py` — single-cell tracker
+
+```
+python stentTrack.py --video cell.mp4 --output tracks.csv --overlay overlay.mp4 \
+    --thresh 40 --min_area 200
+```
+
+- `--video` (required) — input mp4.
+- `--output` (required) — CSV path; written with columns `frame, x, y, pose,
+  movement, direction_deg, contour`.
+- `--overlay` (required) — output mp4 path for the debug overlay (contour,
+  pose box/triangle, head/tail markers, motion arrow), composited over the
+  source video via `ffmpeg`.
+- `--thresh` (float, default `40`) — percentile threshold cutoff after
+  background subtraction.
+- `--min_area` (int, default `200`) — minimum contour area in pixels to
+  count as a cell.
+
+Assumes exactly one Stentor in frame for the whole video.
+
+### `multiTest.py` — multi-cell tracker (no CSV output yet)
+
+```
+python multiTest.py --video colony.mp4 --overlay overlay.mp4 \
+    --n_cells 4 --roi_cx 320 --roi_cy 240 --roi_r 300
+```
+
+- `--video` (required), `--overlay` (required, mp4) — same shape as above,
+  but **no `--output`/CSV flag exists** — this script only ever produces the
+  rendered overlay video (see "Known gaps").
+- `--blur_ksize` (int, default `5`) — Gaussian blur kernel before Otsu.
+- `--min_area` (int, default `200`) — minimum contour area in pixels.
+- `--peak_min_dist` (int, default `15`) — watershed seed spacing in pixels.
+- `--max_dist` (float, default `50`) — max centroid jump (px) allowed for
+  frame-to-frame track assignment.
+- `--max_gap` (int, default `10`) — max frames to gap-fill per track.
+- `--min_track_len` (int, default `3`) — tracks shorter than this are
+  dropped as noise.
+- `--merge_area_thresh` (float, default `1.8`) — blob-area / median-cell-area
+  ratio that flags a merged (touching-cells) blob; lower = more sensitive.
+- `--n_cells` (int, optional) — expected cell count per frame; when set,
+  each frame is forced to reconcile to exactly this many contours (see the
+  "Pass 2b" description above). Omit to skip this enforcement pass entirely.
+- `--roi_cx`, `--roi_cy` (float, optional) — centre of a circular ROI mask in
+  pixels; default to the frame's horizontal/vertical centre if omitted.
+- `--roi_r` (float, optional) — ROI radius in pixels; pixels outside are
+  zeroed before detection. Omit for no masking (full frame).
+
+The script's own `--help` description references a `debug_frame1.py` for
+tuning detection parameters before a real run — **that file does not exist
+anywhere in this repo**; treat that instruction as aspirational/missing
+tooling, not a currently-runnable step (see "Known gaps").
+
+### `csv_compiler.py` — merge TrackMate CSV exports
+
+```
+python csv_compiler.py -i ./trackmate_csvs/ -o compiled.csv
+```
+
+- `-i, --input_folder` (required) — folder containing one or more TrackMate
+  CSV exports.
+- `-o, --output_file` (required) — path for the single merged CSV.
+
+Expects TrackMate's export column names (or the aliases `track id`/
+`trackid`/`id`, `x`/`position_x`, `y`/`position_y`, `t`/`frame`/`time`); rows
+with a non-numeric track id are silently dropped.
+
+### `full_data_plot.py` — population-average speed plot
+
+```
+python full_data_plot.py -i compiled.csv -o avg_velocity.png -color orange -wave 600
+```
+
+- `-i, --input` (required) — a CSV in the Fiji/TrackMate compiled layout
+  above (**not** `stentTrack.py`'s or `multiTest.py`'s output — see the
+  cross-format gap noted above). The script skips the first 4 lines
+  unconditionally and reads columns by fixed position, not header name.
+- `-o, --output` (default `avg_velocity.png`).
+- `-color, --color` (default `gray`) — laser color, used only for the
+  shaded on/off region's fill color in the plot.
+- `-wave, --wavelength` (default `no input`) — cosmetic label only (appears
+  in a legend/title), not used in any calculation.
+
+Assumes 30 fps, 56.25 px/mm, and a fixed 2700-frame (90 s) recording with
+laser on from frame 900–1800 — hand-edit the script's constants for any
+other acquisition setup (see "Known gaps").
+
+### `track_plot.py` — per-track trail + speed plot
+
+```
+python track_plot.py -i compiled.csv -o track.png -s1 1,2,3 -s2 7 -color orange
+```
+
+- `-i, --input` (required), `-o, --output` (default `track.png`) — same CSV
+  assumptions as `full_data_plot.py`.
+- `-s1` .. `-s5` (optional, comma-separated track ids each) — up to 5 named
+  tracks to plot side-by-side; ids listed together under one `-sN` flag are
+  stitched into a single continuous track (e.g. `-s1 1,2,3` treats TrackMate
+  ids 1, 2, and 3 as one track, useful when TrackMate lost/resumed the same
+  cell under a new id).
+- `-color, --color` (default `gray`) — same laser-shading purpose as above.
+
+Also plots a hardcoded reference well-boundary circle and a hardcoded 1 mm
+scale bar position, both tuned to one specific camera/zoom setup — adjust
+in-script for a different rig.
+
+### `stentor_preprocess.ijm` — Fiji/TrackMate preprocessing (manual)
+
+Not a CLI tool: open Fiji, use **File → Import → Image Sequence** on a PNG
+frame folder whose first file is literally named `frame0001.png` (hardcoded
+in the macro), then **Plugins → Macros → Run...** and select this `.ijm`
+file. The macro pauses twice for manual input (tune/run TrackMate detection,
+then save a binary mask by hand) — see the workflow description above.
+Export each finished TrackMate track set as CSV, then feed that folder to
+`csv_compiler.py` above.
+
+---
+
 ## Relationship to RoboCam 3.1
 
 Both workflows above take an already-encoded **mp4 video** as their entry
@@ -147,7 +296,10 @@ repo yet.
 
 ---
 
-## Dependencies (inferred from imports; no lockfile exists)
+## Dependencies
+
+Listed in `requirements.txt` (installed by `bash setup.sh`); still inferred
+from each script's imports rather than pinned to versions verified to work.
 
 - `opencv-python` (`cv2`) — `stentTrack.py`, `multiTest.py`
 - `numpy` — `stentTrack.py`, `multiTest.py`, `full_data_plot.py`,
@@ -168,9 +320,14 @@ repo yet.
 ## Known gaps
 
 - No automated tests.
-- No dependency manifest (`requirements.txt` etc.).
+- No dependency version pins — `requirements.txt` lists unpinned package
+  names only.
 - `multiTest.py`'s filename doesn't match its own documented identity
   (`contour_video.py`).
+- `multiTest.py`'s own `--help` text and header docstring instruct the user
+  to "use `debug_frame1.py` to tune detection parameters first" — that file
+  does not exist anywhere in this repo, so that step can't currently be
+  followed.
 - `multiTest.py` produces no CSV, only a rendered overlay video — its
   richer per-cell tracking data (including which frames were gap-filled,
   merge-split, or forced) isn't persisted anywhere outside the process.
