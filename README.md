@@ -294,6 +294,10 @@ available upstream — whether tracking here should eventually read
 video is an open question for later, not addressed by anything in this
 repo yet.
 
+See [`ROBOCAM_COMPATIBILITY.md`](ROBOCAM_COMPATIBILITY.md) for a detailed,
+code-level assessment of what actually lines up and what doesn't between
+RoboCam 3.1's real output and StentorCam's real input assumptions.
+
 ---
 
 ## Dependencies
