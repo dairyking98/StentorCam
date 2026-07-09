@@ -965,26 +965,26 @@ def _build_roi(height, width, roi_cx, roi_cy, roi_r):
     return circle_mask, _roi_cx, _roi_cy
 
 
-def _process_frames(frames_gray, height, width, circle_mask,
-                    blur_ksize=5, min_area=200, peak_min_dist=15,
-                    max_dist=50, max_gap=10, min_track_len=3,
-                    merge_area_thresh=1.8, n_cells=None):
+def run_pass1(frames_gray, circle_mask, blur_ksize=5, min_area=200,
+             peak_min_dist=15):
     """
-    Core Pass 1 / 1b / 2 / 2b tracking pipeline over an already-loaded
-    (n, H, W) uint8 grayscale frame stack — source-agnostic: a decoded
-    video and a RoboCam raw burst both land here in the same shape.
+    Pass 1 — per-frame detection: background subtraction + Otsu mask +
+    contour extraction. `peak_min_dist` isn't used by this pass itself
+    (only by the watershed splitting inside correction_sweep/
+    enforce_n_cells) but is accepted here so callers can pass one
+    consistent parameter set through every pass.
 
-    Returns corrected_frame_tracks: list of lists, one per frame, each a
-    list of {"track_id", "centroid", "contour", "corrected"} entries.
+    Returns:
+        all_detections : list of lists of {"centroid", "contour"} dicts,
+                         one list per frame
+        all_masks      : list of uint8 binary foreground masks, one per
+                         frame (needed by later passes for merge splitting)
     """
-    background = np.median(frames_gray, axis=0).astype(np.uint8)
+    background   = np.median(frames_gray, axis=0).astype(np.uint8)
     print("Median background computed.")
+    morph_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    ksize        = blur_ksize if blur_ksize % 2 == 1 else blur_ksize + 1
 
-    # ------------------------------------------------------------------
-    # Pass 1 — per-frame detection
-    # ------------------------------------------------------------------
-    morph_kernel   = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    ksize          = blur_ksize if blur_ksize % 2 == 1 else blur_ksize + 1
     all_detections = []   # list of lists of detection dicts
     all_masks      = []   # binary foreground masks per frame (for merge splitting)
 
@@ -1014,6 +1014,29 @@ def _process_frames(frames_gray, height, width, circle_mask,
             detections.append({"centroid": cen, "contour": contour})
 
         all_detections.append(detections)
+
+    return all_detections, all_masks
+
+
+def _process_frames(frames_gray, height, width, circle_mask,
+                    blur_ksize=5, min_area=200, peak_min_dist=15,
+                    max_dist=50, max_gap=10, min_track_len=3,
+                    merge_area_thresh=1.8, n_cells=None):
+    """
+    Core Pass 1 / 1b / 2 / 2b tracking pipeline over an already-loaded
+    (n, H, W) uint8 grayscale frame stack — source-agnostic: a decoded
+    video and a RoboCam raw burst both land here in the same shape.
+
+    Returns corrected_frame_tracks: list of lists, one per frame, each a
+    list of {"track_id", "centroid", "contour", "corrected"} entries.
+    """
+    # ------------------------------------------------------------------
+    # Pass 1 — per-frame detection
+    # ------------------------------------------------------------------
+    all_detections, all_masks = run_pass1(
+        frames_gray, circle_mask, blur_ksize=blur_ksize,
+        min_area=min_area, peak_min_dist=peak_min_dist,
+    )
 
     # ------------------------------------------------------------------
     # Pass 1b — proximity-based track assignment
@@ -1108,17 +1131,16 @@ def render_overlay_frames(corrected_frame_tracks, height, width, temp_dir,
         )
 
 
-def detect_and_label(video_path, overlay_video, output_csv=None,
-                     blur_ksize=5, min_area=200, peak_min_dist=15,
-                     max_dist=50, max_gap=10, min_track_len=3,
-                     merge_area_thresh=1.8, n_cells=None,
-                     roi_cx=None, roi_cy=None, roi_r=None):
+def load_video_frames(video_path):
     """
-    --video entry point: decode a single mp4 with OpenCV, run the
-    tracking pipeline, optionally write a CSV (frame, track_id, x, y,
-    correction, contour), then composite the overlay onto the original
-    video with ffmpeg — unchanged from before the shared pipeline was
-    split into _process_frames/render_overlay_frames.
+    Decode a single mp4 with OpenCV into an in-memory grayscale frame
+    stack — the --video counterpart to robocam_input.load_well_frames(),
+    giving the GUI one uniform interface regardless of input source.
+
+    Returns:
+        frames_gray : (n, H, W) uint8 array
+        height, width : int
+        fps : float (from the container, falling back to 30.0)
     """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -1141,6 +1163,23 @@ def detect_and_label(video_path, overlay_video, output_csv=None,
         frames_gray.append(gray.astype(np.uint8))
     cap.release()
     frames_gray = np.array(frames_gray)
+
+    return frames_gray, height, width, fps
+
+
+def detect_and_label(video_path, overlay_video, output_csv=None,
+                     blur_ksize=5, min_area=200, peak_min_dist=15,
+                     max_dist=50, max_gap=10, min_track_len=3,
+                     merge_area_thresh=1.8, n_cells=None,
+                     roi_cx=None, roi_cy=None, roi_r=None):
+    """
+    --video entry point: decode a single mp4 with OpenCV, run the
+    tracking pipeline, optionally write a CSV (frame, track_id, x, y,
+    correction, contour), then composite the overlay onto the original
+    video with ffmpeg — unchanged from before the shared pipeline was
+    split into _process_frames/render_overlay_frames.
+    """
+    frames_gray, height, width, fps = load_video_frames(video_path)
 
     circle_mask, _roi_cx, _roi_cy = _build_roi(height, width, roi_cx, roi_cy, roi_r)
 

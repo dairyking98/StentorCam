@@ -4,3 +4,4 @@ pandas
 tqdm
 scipy
 matplotlib
+PySide6

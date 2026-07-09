@@ -259,6 +259,41 @@ tuning detection parameters before a real run — **that file does not exist
 anywhere in this repo**; treat that instruction as aspirational/missing
 tooling, not a currently-runnable step (see "Known gaps").
 
+#### `multiTest_gui.py` — step-by-step tuning wizard for `multiTest.py`
+
+```
+python multiTest_gui.py
+```
+
+A PySide6 GUI wrapping `multiTest.py` only (its 5 stages and 8+ parameters
+are what actually benefit from step-by-step tuning; `stentTrack.py`'s 2
+parameters don't). Walks through the pipeline one stage at a time —
+**Input & Clip → ROI → Detection → Track Assignment → Correction Sweep →
+n_cells Enforcement → Export** — against a short scrubbable clip (a
+user-chosen start frame + length, default 60 frames) from either a
+`--video` file or a `--exp_dir` RoboCam experiment directory (with a well
+picker). Each stage previews its effect on that clip with a scrub slider;
+changing a stage's parameters only invalidates and recomputes that stage
+and everything after it, not the whole pipeline. The final **Export** step
+runs the finalized parameters against the *entire* source (not just the
+clip) through `multiTest.py`'s own unchanged `detect_and_label`/
+`run_exp_dir` functions — a GUI-driven export and a CLI-driven run with the
+same parameters take the identical code path and produce identical output.
+
+Architecture lives under `gui/` (`pipeline_state.py` for the cache/
+invalidation logic, `preview.py` for image-conversion + the scrub widget,
+`steps/*.py` for one file per wizard stage, `main_window.py` for
+navigation) — it calls `multiTest.py`'s existing functions
+(`run_pass1`, `assign_tracks`, `correction_sweep`, `enforce_n_cells`,
+`draw_overlay`, etc.) directly rather than reimplementing the tracking
+algorithm a second time.
+
+Known limitation: for `--exp_dir` clips, the whole well's frames are
+loaded via `robocam_input.load_well_frames` before slicing out the
+requested clip range (no partial-range loading exists yet in
+`robocam_input.py`), so clip selection is instant for `--video` (which
+seeks directly) but not for a very long RoboCam well capture.
+
 ### `csv_compiler.py` — merge TrackMate CSV exports
 
 ```
@@ -359,6 +394,8 @@ from each script's imports rather than pinned to versions verified to work.
 - `matplotlib` — `full_data_plot.py`, `track_plot.py` (both also attempt a
   custom style, `plt.style.use('BME163')`, that isn't bundled here — falls
   back to matplotlib's default style with a printed warning if missing)
+- `PySide6` — `multiTest_gui.py` and everything under `gui/`. Matches
+  RoboCam 3.1's own GUI stack. Not needed for any CLI script.
 - `ffmpeg` — external binary, invoked via `subprocess.run` by
   `stentTrack.py` and `multiTest.py` to composite the PNG overlay sequence
   back onto the source video. Not a Python dependency; must be on `PATH`.
@@ -403,3 +440,12 @@ from each script's imports rather than pinned to versions verified to work.
 - `--n_cells`/`--roi_cx`/`--roi_cy`/`--roi_r` apply identically to every
   well in an `--exp_dir` batch run — there's no per-well override if,
   say, different wells have different cell counts.
+- `multiTest_gui.py`'s `--exp_dir` clip loading has no partial-range read —
+  it loads the whole well via `robocam_input.load_well_frames` before
+  slicing out the requested clip, so picking a short clip from a long
+  RoboCam well capture is not instant the way it is for `--video` (which
+  seeks directly via `cv2.VideoCapture`).
+- `multiTest_gui.py` has only been smoke-tested headless
+  (`QT_QPA_PLATFORM=offscreen`) against the same synthetic fixture as
+  `--exp_dir` — not exercised with a real display/mouse or a real RoboCam
+  capture.
