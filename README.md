@@ -98,9 +98,16 @@ meaningful.
 ### 2. Standalone Python/OpenCV workflow (automatic)
 
 ```
-video (mp4)
-  → stentTrack.py   (single cell)      → CSV + ffmpeg overlay video
-  → multiTest.py    (multiple cells)   → ffmpeg overlay video only (no CSV yet)
+video (mp4)                                    → CSV + ffmpeg overlay video
+  → stentTrack.py   (single cell)
+  → multiTest.py    (multiple cells)
+
+  -- or, reading a RoboCam 3.1 experiment directory directly --
+
+RoboCam 3.1 <exp_dir>/raw/*.npy (via robocam_input.py, one invocation
+  batches every well found)                    → per-well CSV + overlay video
+  → stentTrack.py --exp_dir
+  → multiTest.py  --exp_dir
 ```
 
 - **`stentTrack.py`** — single-stentor tracker. Per video: computes a
@@ -142,13 +149,20 @@ video (mp4)
   5. **Pass 3**: renders an overlay (dashed = gap-filled, thick = merge-
      split, dotted = soft-recovered, cross = fully synthesized/forced,
      solid = real detection) and composites it over the source video via
-     `ffmpeg`.
-  This script **does not currently write a CSV** — only the overlay video
-  — so none of its tracking data (positions, corrections applied, cell
-  count) is persisted for the plotting scripts or anything else to consume.
+     `ffmpeg`. Also writes a CSV (`frame, track_id, x, y, correction,
+     contour`) exposing the same gap-filled/merge-split/soft-recover/forced
+     tag the overlay's line style already encodes visually, as structured
+     data instead of only a picture.
+
+Both `stentTrack.py` and `multiTest.py` also accept `--exp_dir <path>`
+instead of `--video`, reading a RoboCam 3.1 experiment directory's
+`raw/*.npy` well-stacks directly (via the shared `robocam_input.py`
+module) and batch-processing every well found, writing per-well CSV +
+overlay outputs to `<exp_dir>/tracking/`. See "Usage" below.
 
 `stentTrack.py`'s own CSV schema (`frame, x, y, pose, movement,
-direction_deg, contour`) does not match what `full_data_plot.py` /
+direction_deg, contour`) and `multiTest.py`'s (`frame, track_id, x, y,
+correction, contour`) both differ from what `full_data_plot.py` /
 `track_plot.py` expect (the Fiji/TrackMate fixed-column layout above), so
 today there is no script that takes either Python tracker's output straight
 into the plotting scripts without a manual reformatting step.
@@ -168,31 +182,60 @@ first (see "Setup" above), then either `source .venv/bin/activate` and call
 ```
 python stentTrack.py --video cell.mp4 --output tracks.csv --overlay overlay.mp4 \
     --thresh 40 --min_area 200
+
+# or, reading a RoboCam 3.1 experiment directory directly (batches every
+# well found under <exp_dir>/raw/, writing to <exp_dir>/tracking/):
+python stentTrack.py --exp_dir /path/to/robocam_experiment_dir
 ```
 
-- `--video` (required) — input mp4.
-- `--output` (required) — CSV path; written with columns `frame, x, y, pose,
-  movement, direction_deg, contour`.
-- `--overlay` (required) — output mp4 path for the debug overlay (contour,
-  pose box/triangle, head/tail markers, motion arrow), composited over the
-  source video via `ffmpeg`.
+- `--video` / `--exp_dir` (mutually exclusive, one required):
+  - `--video` — single input mp4.
+  - `--exp_dir` — a RoboCam 3.1 experiment directory. Reads `raw/*.npy`
+    well-stacks directly (never `images/`/`videos/`, even if present —
+    see `ROBOCAM_COMPATIBILITY.md`) via the shared `robocam_input.py`
+    module, and processes every well found. `--output`/`--overlay` are
+    not used in this mode; per-well paths are auto-derived as
+    `<exp_dir>/tracking/<well>_<exp_ts>_tracks.csv` and
+    `..._overlay.mp4`. Only the current stacked-array raw format is
+    supported (no legacy pre-2026-07-06 per-frame-file fallback).
+- `--output` (required with `--video`) — CSV path; written with columns
+  `frame, x, y, pose, movement, direction_deg, contour`.
+- `--overlay` (required with `--video`) — output mp4 path for the debug
+  overlay (contour, pose box/triangle, head/tail markers, motion arrow),
+  composited over the source video via `ffmpeg`.
 - `--thresh` (float, default `40`) — percentile threshold cutoff after
   background subtraction.
 - `--min_area` (int, default `200`) — minimum contour area in pixels to
   count as a cell.
 
-Assumes exactly one Stentor in frame for the whole video.
+Assumes exactly one Stentor in frame for the whole video (or per well, in
+`--exp_dir` mode).
 
-### `multiTest.py` — multi-cell tracker (no CSV output yet)
+### `multiTest.py` — multi-cell tracker
 
 ```
-python multiTest.py --video colony.mp4 --overlay overlay.mp4 \
+python multiTest.py --video colony.mp4 --overlay overlay.mp4 --output tracks.csv \
     --n_cells 4 --roi_cx 320 --roi_cy 240 --roi_r 300
+
+# or, reading a RoboCam 3.1 experiment directory directly (same batching
+# behavior as stentTrack.py above):
+python multiTest.py --exp_dir /path/to/robocam_experiment_dir --n_cells 4
 ```
 
-- `--video` (required), `--overlay` (required, mp4) — same shape as above,
-  but **no `--output`/CSV flag exists** — this script only ever produces the
-  rendered overlay video (see "Known gaps").
+- `--video` / `--exp_dir` (mutually exclusive, one required) — same shape
+  as `stentTrack.py` above: `--exp_dir` batches every well found, writing
+  to `<exp_dir>/tracking/`, and `--output`/`--overlay` are not used in
+  that mode.
+- `--output` (optional with `--video`) — CSV path; written with columns
+  `frame, track_id, x, y, correction, contour`, where `correction` is
+  `real`/`gap_fill`/`merge_split`/`soft_recover`/`forced` — the same tag
+  `draw_overlay()` already uses to pick the overlay's line style (dashed/
+  thick/dotted/cross/solid), now also exposed as data. Always written in
+  `--exp_dir` mode.
+- `--overlay` (required with `--video`) — output mp4 path.
+- `--n_cells`, `--roi_cx`, `--roi_cy`, `--roi_r`, and the other tuning
+  flags below apply identically to every well in a batch `--exp_dir` run
+  (one shared value, no per-well override).
 - `--blur_ksize` (int, default `5`) — Gaussian blur kernel before Otsu.
 - `--min_area` (int, default `200`) — minimum contour area in pixels.
 - `--peak_min_dist` (int, default `15`) — watershed seed spacing in pixels.
@@ -283,16 +326,18 @@ Export each finished TrackMate track set as CSV, then feed that folder to
 
 ## Relationship to RoboCam 3.1
 
-Both workflows above take an already-encoded **mp4 video** as their entry
-point (`stentTrack.py --video`, `multiTest.py --video`, or a PNG sequence
-for the Fiji macro). RoboCam 3.1's raw-burst capture mode writes each
-well's frames directly as one memory-mapped `.npy` stack (see that repo's
-`PROJECT_STATE.md` §§ 3–4, 8) and only produces an mp4/MKV as a
-*post-processing* output, so video is no longer the only frame source
-available upstream — whether tracking here should eventually read
-`.npy`/PNG output directly instead of round-tripping through an encoded
-video is an open question for later, not addressed by anything in this
-repo yet.
+The Fiji workflow still only takes a PNG sequence (and is confirmed
+**incompatible** with RoboCam's actual PNG naming — see
+`ROBOCAM_COMPATIBILITY.md`). The standalone Python/OpenCV workflow
+(`stentTrack.py`, `multiTest.py`) now has two entry points: `--video` (an
+already-encoded mp4, as before) and `--exp_dir` (a RoboCam 3.1 experiment
+directory, reading `raw/*.npy` well-stacks directly via `robocam_input.py`
+— no video round-trip, no dependency on RoboCam's own postprocessing step
+having been run). This has been manually verified against a synthetic
+fixture (a hand-built fake `raw/` directory, not a committed automated
+test — see "Known gaps"), **not yet against a real RoboCam capture** —
+see `ROBOCAM_COMPATIBILITY.md`'s open questions for what's still
+unconfirmed on real hardware.
 
 See [`ROBOCAM_COMPATIBILITY.md`](ROBOCAM_COMPATIBILITY.md) for a detailed,
 code-level assessment of what actually lines up and what doesn't between
@@ -308,7 +353,7 @@ from each script's imports rather than pinned to versions verified to work.
 - `opencv-python` (`cv2`) — `stentTrack.py`, `multiTest.py`
 - `numpy` — `stentTrack.py`, `multiTest.py`, `full_data_plot.py`,
   `track_plot.py`
-- `pandas` — `stentTrack.py` (CSV output via `DataFrame.to_csv`)
+- `pandas` — `stentTrack.py`, `multiTest.py` (CSV output via `DataFrame.to_csv`)
 - `tqdm` — `stentTrack.py`, `multiTest.py`
 - `scipy` — `multiTest.py` only (`scipy.optimize.linear_sum_assignment`)
 - `matplotlib` — `full_data_plot.py`, `track_plot.py` (both also attempt a
@@ -332,16 +377,29 @@ from each script's imports rather than pinned to versions verified to work.
   to "use `debug_frame1.py` to tune detection parameters first" — that file
   does not exist anywhere in this repo, so that step can't currently be
   followed.
-- `multiTest.py` produces no CSV, only a rendered overlay video — its
-  richer per-cell tracking data (including which frames were gap-filled,
-  merge-split, or forced) isn't persisted anywhere outside the process.
 - The two plotting scripts hardcode fps (30), a px/mm calibration (56.25),
   and a fixed 2700-frame/90 s recording length with laser-on window at
   frames 900–1800 — none of this is derived from the input CSV or exposed
   as a CLI argument, so a different frame rate, recording duration, or
   camera zoom silently produces a mislabeled/wrong-scale plot rather than
-  an error.
-- No script bridges `stentTrack.py`'s or `multiTest.py`'s output into the
-  CSV shape `full_data_plot.py`/`track_plot.py` expect.
-- No existing path consumes RoboCam 3.1's raw `.npy` well-stacks directly —
-  everything here starts from an already-encoded video or PNG sequence.
+  an error. RoboCam's own metadata already records the real `fps_average`
+  and `laser_events[]` per experiment (see `ROBOCAM_COMPATIBILITY.md`), but
+  nothing plumbs that into these two scripts yet.
+- No script bridges `stentTrack.py`'s or `multiTest.py`'s CSV output into
+  the fixed-column CSV shape `full_data_plot.py`/`track_plot.py` expect —
+  three different, mutually-incompatible CSV schemas now exist in this
+  repo (`stentTrack.py`'s `frame,x,y,pose,movement,direction_deg,contour`,
+  `multiTest.py`'s `frame,track_id,x,y,correction,contour`, and the
+  Fiji/TrackMate fixed-column layout the plotting scripts read).
+- `robocam_input.py` (new) only supports RoboCam's current stacked-array
+  raw format — the legacy pre-2026-07-06 one-`.npy`-file-per-frame format
+  is not supported, so an old archived experiment directory in that format
+  will raise rather than load.
+- `--exp_dir` batch mode has only been exercised against a hand-built
+  synthetic fixture, not a real RoboCam capture, and there's no committed
+  automated test for it (see "No automated tests" above) — the RoboCam
+  compatibility open questions in `ROBOCAM_COMPATIBILITY.md` (real well
+  boundary visibility, actual px/mm scale, etc.) are still open.
+- `--n_cells`/`--roi_cx`/`--roi_cy`/`--roi_r` apply identically to every
+  well in an `--exp_dir` batch run — there's no per-well override if,
+  say, different wells have different cell counts.
