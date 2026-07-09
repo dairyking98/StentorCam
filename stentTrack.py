@@ -22,20 +22,26 @@ full video
 - csv output generation
 
 
-Inputs : 
---video     : Input video file
---output    : Output CSV file path
---overlay   : Output overlay video path
+Inputs (--video and --exp_dir are mutually exclusive):
+--video     : Single input video file
+--exp_dir   : RoboCam 3.1 experiment directory — reads raw/*.npy directly
+              (via robocam_input.py) and batches every well found under
+              <exp_dir>/raw/, writing outputs to <exp_dir>/tracking/.
+              --output/--overlay are not used in this mode (per-well paths
+              are auto-derived).
+--output    : Output CSV file path (--video mode only)
+--overlay   : Output overlay video path (--video mode only)
 --thresh    : Percentile threshold for foreground segmentation
---min_area  : Minimum contour area to consider 
+--min_area  : Minimum contour area to consider
 
-Outputs : 
---output    : CSV file with per-frame tracking data
---overlay   : Overlay video with annotations
+Outputs :
+--output / <exp_dir>/tracking/*_tracks.csv   : CSV file with per-frame tracking data
+--overlay / <exp_dir>/tracking/*_overlay.mp4 : Overlay video with annotations
 
 
 Example Usage (on command line) :
 python stentTrack.py --output stentTrack.csv --overlay stentTrack.mp4 --thresh 99.5 --video video_path.mp4
+python stentTrack.py --exp_dir /path/to/robocam_experiment_dir
 
 Debugging : 
 "#debugging ..." may be found in the code 
@@ -51,7 +57,10 @@ import argparse
 import math
 from collections import deque
 import os
+import shutil
 import subprocess
+
+import robocam_input as ri
 
 # ----------------------------
 # Utility functions
@@ -405,46 +414,31 @@ def find_head_tail_from_triangle_weighted(triangle, centroid, direction_deg):
 # Main tracking function
 # ----------------------------
 
-def track_cell(video_path, output_csv, overlay_video, thresh_val=40, min_area=200):
+def _run_tracking(frames_gray, height, width, temp_overlay_dir,
+                   thresh_val=40, min_area=200):
     """
-    Main tracking pipeline.
+    Core tracking pipeline, operating on an already-loaded (n, H, W) uint8
+    grayscale frame stack (source-agnostic: decoded video or a RoboCam raw
+    burst both land here in the same shape).
 
     Steps:
     ------
-    1. Load video, get frames and compute background (median frame)
+    1. Compute background (median frame)
     2. Foreground segmentation via percentile threshold
     3. Extract largest contour per frame
     4. Compute centroid, pose, direction
     5. Detect head/tail if elongated
-    6. Save overlay frames and CSV output
-    7. Combine overlay frames into video (ffmpeg)
+    6. Save overlay frames
 
-    Outputs:
-    --------
-    CSV columns:
-        frame, x, y, pose, movement, direction_deg, contour
+    Returns:
+        results (list[dict]): one row per frame, columns
+            frame, x, y, pose, movement, direction_deg, contour
+        frame_count (int)
     """
-
-    cap = cv2.VideoCapture(video_path)
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-    temp_overlay_dir = "overlay_frames_temp"
-    os.makedirs(temp_overlay_dir, exist_ok=True)
-
-    frames_gray = []
-    for _ in tqdm(range(frame_count), desc="Reading frames"):
-        ret, frame = cap.read()
-        if not ret:
-            break
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        gray = cv2.normalize(gray, None, 0, 255, cv2.NORM_MINMAX)
-        frames_gray.append(gray.astype(np.uint8))
-
-    frames_gray = np.array(frames_gray)
+    frame_count = len(frames_gray)
     background = np.median(frames_gray, axis=0).astype(np.uint8)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
+    os.makedirs(temp_overlay_dir, exist_ok=True)
 
     results = []
     pos_history = deque(maxlen=6)
@@ -455,10 +449,6 @@ def track_cell(video_path, output_csv, overlay_video, thresh_val=40, min_area=20
     errors = []
 
     for frame_idx in tqdm(range(frame_count), desc="Tracking"):
-        ret, frame = cap.read()
-        if not ret:
-            break
-
         gray = frames_gray[frame_idx]
         fg = cv2.absdiff(gray, background)
 
@@ -566,12 +556,53 @@ def track_cell(video_path, output_csv, overlay_video, thresh_val=40, min_area=20
             #"circ_error": cerror,
             "direction_deg": direction,
             "contour": contour_str
-            
+
         })
-    
+
+    #debugging : print scores
+    '''
+    for s in scores_idx:
+        print(s)
+
+    for e in errors:
+        print(e)
+    '''
+
+    return results, frame_count
 
 
+def track_cell(video_path, output_csv, overlay_video, thresh_val=40, min_area=200):
+    """
+    --video entry point: decode a single mp4 with OpenCV, run the tracking
+    pipeline, then composite the overlay onto the original video with
+    ffmpeg (unchanged from before _run_tracking was split out).
+
+    Outputs:
+    --------
+    CSV columns:
+        frame, x, y, pose, movement, direction_deg, contour
+    """
+    cap = cv2.VideoCapture(video_path)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    temp_overlay_dir = "overlay_frames_temp"
+
+    frames_gray = []
+    for _ in tqdm(range(frame_count), desc="Reading frames"):
+        ret, frame = cap.read()
+        if not ret:
+            break
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray = cv2.normalize(gray, None, 0, 255, cv2.NORM_MINMAX)
+        frames_gray.append(gray.astype(np.uint8))
+    frames_gray = np.array(frames_gray)
     cap.release()
+
+    results, _ = _run_tracking(frames_gray, height, width, temp_overlay_dir,
+                                thresh_val, min_area)
+
     pd.DataFrame(results).to_csv(output_csv, index=False)
     print(f"Saved CSV → {output_csv}")
 
@@ -588,32 +619,91 @@ def track_cell(video_path, output_csv, overlay_video, thresh_val=40, min_area=20
     subprocess.run(cmd, check=True)
     print(f"Saved overlay → {overlay_video}")
 
-    #debugging : print scores
-    '''
-    for s in scores_idx:
-        print(s)
-    
-    for e in errors:
-        print(e)
-    '''
+
+def track_cell_from_wellframes(wf, output_csv, overlay_video, temp_overlay_dir,
+                                thresh_val=40, min_area=200):
+    """
+    --exp_dir entry point for one already-loaded RoboCam well (see
+    robocam_input.WellFrames). There is no pre-existing encoded source
+    video to hand to ffmpeg, so the lazily-debayered BGR frames are piped
+    into ffmpeg's first input over stdin instead of a file path — same
+    overlay filter graph as the --video path otherwise.
+    """
+    results, frame_count = _run_tracking(wf.frames_gray, wf.height, wf.width,
+                                          temp_overlay_dir, thresh_val, min_area)
+
+    pd.DataFrame(results).to_csv(output_csv, index=False)
+    print(f"Saved CSV → {output_csv}")
+
+    overlay_pattern = os.path.join(temp_overlay_dir, "frame_%05d.png")
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "rawvideo", "-pix_fmt", "bgr24",
+        "-s", f"{wf.width}x{wf.height}",
+        "-r", str(wf.fps),
+        "-i", "-",
+        "-r", str(wf.fps),
+        "-i", overlay_pattern,
+        "-filter_complex", "[1]format=rgba[ovr];[0][ovr]overlay",
+        "-c:v", "libx264",
+        overlay_video,
+    ]
+    raw_bytes = b"".join(wf.get_bgr(i).tobytes() for i in range(frame_count))
+    subprocess.run(cmd, input=raw_bytes, check=True)
+    print(f"Saved overlay → {overlay_video}")
+
+
+def run_exp_dir(exp_dir, thresh_val=40, min_area=200):
+    """
+    Batch entry point: process every well found under <exp_dir>/raw/,
+    writing per-well CSV + overlay outputs to <exp_dir>/tracking/.
+    """
+    wells = ri.discover_wells(exp_dir)
+    tracking_dir = os.path.join(exp_dir, "tracking")
+    os.makedirs(tracking_dir, exist_ok=True)
+
+    for well, exp_ts, metadata_path in wells:
+        wf = ri.load_well_frames(exp_dir, well, exp_ts, metadata_path)
+        if wf is None:
+            print(f"  [skip] {well} has 0 captured frames")
+            continue
+
+        print(f"=== Well {well} ({wf.frames_gray.shape[0]} frames) ===")
+        output_csv = os.path.join(tracking_dir, f"{well}_{exp_ts}_tracks.csv")
+        overlay_video = os.path.join(tracking_dir, f"{well}_{exp_ts}_overlay.mp4")
+        temp_overlay_dir = os.path.join(tracking_dir, f".overlay_tmp_{well}_{exp_ts}")
+
+        try:
+            track_cell_from_wellframes(wf, output_csv, overlay_video,
+                                        temp_overlay_dir, thresh_val, min_area)
+        finally:
+            shutil.rmtree(temp_overlay_dir, ignore_errors=True)
+
+
 # ----------------------------
 # CLI
 # ----------------------------
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--video", required=True)
-    parser.add_argument("--output", required=True)
-    parser.add_argument("--overlay", required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--video", help="Single input video file")
+    source.add_argument("--exp_dir",
+                         help="RoboCam 3.1 experiment directory — reads "
+                              "raw/*.npy directly and batches every well found")
+    parser.add_argument("--output", help="Output CSV path (--video mode only)")
+    parser.add_argument("--overlay", help="Output overlay video path (--video mode only)")
     parser.add_argument("--thresh", type=float, default=40)
     parser.add_argument("--min_area", type=int, default=200)
 
     args = parser.parse_args()
 
-    track_cell(
-        args.video,
-        args.output,
-        args.overlay,
-        args.thresh,
-        args.min_area
-    )
+    if args.video:
+        if not args.output or not args.overlay:
+            parser.error("--output and --overlay are required with --video")
+        track_cell(args.video, args.output, args.overlay, args.thresh, args.min_area)
+    else:
+        if args.output or args.overlay:
+            parser.error("--output/--overlay are not used with --exp_dir — "
+                          "per-well paths are auto-derived under <exp_dir>/tracking/")
+        run_exp_dir(args.exp_dir, args.thresh, args.min_area)

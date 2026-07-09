@@ -56,9 +56,19 @@ Parameters to tune (use debug_frame1.py first):
     --merge_area_thresh Blob area / median cell area ratio above which a merge
                         is suspected. Default 1.8.
 
-Inputs:
-    --video             Input video file
-    --overlay           Output overlay video path
+Inputs (--video and --exp_dir are mutually exclusive):
+    --video             Single input video file
+    --exp_dir           RoboCam 3.1 experiment directory — reads raw/*.npy
+                        directly (via robocam_input.py) and batches every
+                        well found under <exp_dir>/raw/, writing outputs to
+                        <exp_dir>/tracking/. --output/--overlay are not used
+                        in this mode (per-well paths are auto-derived).
+    --output            Output CSV path (--video mode only). Columns:
+                        frame, track_id, x, y, correction, contour — where
+                        "correction" is real/gap_fill/merge_split/
+                        soft_recover/forced (same tag the overlay's line
+                        style already encodes visually).
+    --overlay           Output overlay video path (--video mode only)
     --blur_ksize        Gaussian blur kernel size before Otsu (default: 5)
     --min_area          Minimum contour area in pixels (default: 200)
     --peak_min_dist     Minimum pixel distance between watershed seeds (default: 15)
@@ -69,25 +79,34 @@ Inputs:
                         area (default: 1.8)
 
 Outputs:
-    --overlay           Video with corrected per-cell contours and labels
+    --output / <exp_dir>/tracking/*_tracks.csv   Per-cell, per-frame CSV
+    --overlay / <exp_dir>/tracking/*_overlay.mp4 Video with corrected
+                        per-cell contours and labels
 
 Example usage:
-    python contour_video.py \
+    python multiTest.py \
         --video input.mp4 \
         --overlay output_overlay.mp4 \
+        --output output_tracks.csv \
         --blur_ksize 5 \
         --min_area 200 \
         --peak_min_dist 15 \
         --max_gap 10
+
+    python multiTest.py --exp_dir /path/to/robocam_experiment_dir
 '''
 
 import cv2
 import numpy as np
+import pandas as pd
 import os
+import shutil
 import subprocess
 import argparse
 from tqdm import tqdm
 from scipy.optimize import linear_sum_assignment
+
+import robocam_input as ri
 
 
 # ---------------------------------------------------------------------------
@@ -930,43 +949,9 @@ def draw_overlay(frame_entries, height, width):
 # Main pipeline
 # ---------------------------------------------------------------------------
 
-def detect_and_label(video_path, overlay_video,
-                     blur_ksize=5, min_area=200, peak_min_dist=15,
-                     max_dist=50, max_gap=10, min_track_len=3,
-                     merge_area_thresh=1.8, n_cells=None,
-                     roi_cx=None, roi_cy=None, roi_r=None):
-
-    # ------------------------------------------------------------------
-    # 1. Read all frames + compute median background
-    # ------------------------------------------------------------------
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise FileNotFoundError(f"Cannot open video: {video_path}")
-
-    width       = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height      = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    fps         = cap.get(cv2.CAP_PROP_FPS) or 30.0
-
-    print(f"Video: {width}x{height}, {frame_count} frames @ {fps:.1f} fps")
-
-    frames_gray = []
-    for _ in tqdm(range(frame_count), desc="Reading frames"):
-        ret, frame = cap.read()
-        if not ret:
-            break
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        gray = cv2.normalize(gray, None, 0, 255, cv2.NORM_MINMAX)
-        frames_gray.append(gray.astype(np.uint8))
-    cap.release()
-
-    frames_gray = np.array(frames_gray)
-    background  = np.median(frames_gray, axis=0).astype(np.uint8)
-    print("Median background computed.")
-
-    # ------------------------------------------------------------------
-    # 1b. Build circular ROI mask (once — reused every frame)
-    # ------------------------------------------------------------------
+def _build_roi(height, width, roi_cx, roi_cy, roi_r):
+    """Resolve circular-ROI parameters and build the mask once (reused
+    every frame). Returns (circle_mask_or_None, roi_cx, roi_cy)."""
     _roi_cx = roi_cx if roi_cx is not None else width  / 2.0
     _roi_cy = roi_cy if roi_cy is not None else height / 2.0
 
@@ -977,8 +962,26 @@ def detect_and_label(video_path, overlay_video,
         circle_mask = None
         print("No circular ROI — using full frame.")
 
+    return circle_mask, _roi_cx, _roi_cy
+
+
+def _process_frames(frames_gray, height, width, circle_mask,
+                    blur_ksize=5, min_area=200, peak_min_dist=15,
+                    max_dist=50, max_gap=10, min_track_len=3,
+                    merge_area_thresh=1.8, n_cells=None):
+    """
+    Core Pass 1 / 1b / 2 / 2b tracking pipeline over an already-loaded
+    (n, H, W) uint8 grayscale frame stack — source-agnostic: a decoded
+    video and a RoboCam raw burst both land here in the same shape.
+
+    Returns corrected_frame_tracks: list of lists, one per frame, each a
+    list of {"track_id", "centroid", "contour", "corrected"} entries.
+    """
+    background = np.median(frames_gray, axis=0).astype(np.uint8)
+    print("Median background computed.")
+
     # ------------------------------------------------------------------
-    # 2. Pass 1 — per-frame detection
+    # Pass 1 — per-frame detection
     # ------------------------------------------------------------------
     morph_kernel   = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     ksize          = blur_ksize if blur_ksize % 2 == 1 else blur_ksize + 1
@@ -1013,14 +1016,14 @@ def detect_and_label(video_path, overlay_video,
         all_detections.append(detections)
 
     # ------------------------------------------------------------------
-    # 3. Pass 1b — proximity-based track assignment
+    # Pass 1b — proximity-based track assignment
     # ------------------------------------------------------------------
     print("Pass 1b: assigning track identities...")
     tracks, frame_tracks = assign_tracks(all_detections, max_dist=max_dist)
     print(f"  {len(tracks)} raw tracks found.")
 
     # ------------------------------------------------------------------
-    # 4. Pass 2 — bidirectional correction sweep
+    # Pass 2 — bidirectional correction sweep
     # ------------------------------------------------------------------
     print("Pass 2: correction sweep...")
     corrected, global_median_area = correction_sweep(
@@ -1034,7 +1037,7 @@ def detect_and_label(video_path, overlay_video,
     )
 
     # ------------------------------------------------------------------
-    # 4b. Pass 2b — n_cells enforcement
+    # Pass 2b — n_cells enforcement
     # ------------------------------------------------------------------
     if n_cells is not None:
         print(f"Pass 2b: enforcing n_cells={n_cells} per frame...")
@@ -1053,32 +1056,108 @@ def detect_and_label(video_path, overlay_video,
     else:
         print("n_cells not set — skipping cell-count enforcement.")
 
-    corrected_frame_tracks = [
-        list(corrected[f].values()) for f in range(len(frames_gray))
-    ]
+    return [list(corrected[f].values()) for f in range(len(frames_gray))]
 
-    # ------------------------------------------------------------------
-    # 5. Pass 3 — overlay rendering
-    # ------------------------------------------------------------------
-    temp_dir = "overlay_frames_temp"
+
+def _contour_to_string(contour):
+    """Serialize a contour to 'x1,y1;x2,y2;...' (same format as
+    stentTrack.py's contour_to_string)."""
+    return ";".join([f"{int(p[0][0])},{int(p[0][1])}" for p in contour])
+
+
+def write_tracks_csv(corrected_frame_tracks, output_csv):
+    """
+    Write one row per (frame, track) to output_csv:
+        frame, track_id, x, y, correction, contour
+    "correction" is the same tag draw_overlay() already uses to choose
+    line style: a real detection (None) becomes "real"; otherwise one of
+    gap_fill / merge_split / soft_recover / forced.
+    """
+    rows = []
+    for frame_idx, entries in enumerate(corrected_frame_tracks):
+        for entry in entries:
+            contour = entry.get("contour")
+            rows.append({
+                "frame": frame_idx,
+                "track_id": entry["track_id"],
+                "x": entry["centroid"][0],
+                "y": entry["centroid"][1],
+                "correction": entry.get("corrected") or "real",
+                "contour": _contour_to_string(contour) if contour is not None else "",
+            })
+    pd.DataFrame(rows).to_csv(output_csv, index=False)
+    print(f"Saved CSV → {output_csv}")
+
+
+def render_overlay_frames(corrected_frame_tracks, height, width, temp_dir,
+                          circle_mask=None, roi_cx=None, roi_cy=None, roi_r=None):
+    """Pass 3: draw each frame's corrected tracks onto a transparent RGBA
+    canvas and write it to temp_dir as frame_%05d.png."""
     os.makedirs(temp_dir, exist_ok=True)
 
-    for frame_idx in tqdm(range(len(frames_gray)), desc="Pass 3: rendering"):
-        overlay_frame = draw_overlay(
-            corrected_frame_tracks[frame_idx], height, width
-        )
+    for frame_idx, entries in enumerate(
+            tqdm(corrected_frame_tracks, desc="Pass 3: rendering")):
+        overlay_frame = draw_overlay(entries, height, width)
         if circle_mask is not None:
             cv2.circle(overlay_frame,
-                       (int(_roi_cx), int(_roi_cy)), int(roi_r),
+                       (int(roi_cx), int(roi_cy)), int(roi_r),
                        (200, 200, 200, 120), 2)
         cv2.imwrite(
             os.path.join(temp_dir, f"frame_{frame_idx:05d}.png"),
             overlay_frame
         )
 
-    # ------------------------------------------------------------------
-    # 6. ffmpeg composite
-    # ------------------------------------------------------------------
+
+def detect_and_label(video_path, overlay_video, output_csv=None,
+                     blur_ksize=5, min_area=200, peak_min_dist=15,
+                     max_dist=50, max_gap=10, min_track_len=3,
+                     merge_area_thresh=1.8, n_cells=None,
+                     roi_cx=None, roi_cy=None, roi_r=None):
+    """
+    --video entry point: decode a single mp4 with OpenCV, run the
+    tracking pipeline, optionally write a CSV (frame, track_id, x, y,
+    correction, contour), then composite the overlay onto the original
+    video with ffmpeg — unchanged from before the shared pipeline was
+    split into _process_frames/render_overlay_frames.
+    """
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise FileNotFoundError(f"Cannot open video: {video_path}")
+
+    width       = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height      = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps         = cap.get(cv2.CAP_PROP_FPS) or 30.0
+
+    print(f"Video: {width}x{height}, {frame_count} frames @ {fps:.1f} fps")
+
+    frames_gray = []
+    for _ in tqdm(range(frame_count), desc="Reading frames"):
+        ret, frame = cap.read()
+        if not ret:
+            break
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray = cv2.normalize(gray, None, 0, 255, cv2.NORM_MINMAX)
+        frames_gray.append(gray.astype(np.uint8))
+    cap.release()
+    frames_gray = np.array(frames_gray)
+
+    circle_mask, _roi_cx, _roi_cy = _build_roi(height, width, roi_cx, roi_cy, roi_r)
+
+    corrected_frame_tracks = _process_frames(
+        frames_gray, height, width, circle_mask,
+        blur_ksize=blur_ksize, min_area=min_area, peak_min_dist=peak_min_dist,
+        max_dist=max_dist, max_gap=max_gap, min_track_len=min_track_len,
+        merge_area_thresh=merge_area_thresh, n_cells=n_cells,
+    )
+
+    if output_csv:
+        write_tracks_csv(corrected_frame_tracks, output_csv)
+
+    temp_dir = "overlay_frames_temp"
+    render_overlay_frames(corrected_frame_tracks, height, width, temp_dir,
+                          circle_mask, _roi_cx, _roi_cy, roi_r)
+
     overlay_pattern = os.path.join(temp_dir, "frame_%05d.png")
     cmd = [
         "ffmpeg", "-y",
@@ -1093,6 +1172,80 @@ def detect_and_label(video_path, overlay_video,
     print(f"Saved overlay → {overlay_video}")
 
 
+def detect_and_label_from_wellframes(wf, output_csv, overlay_video, temp_dir,
+                                     blur_ksize=5, min_area=200, peak_min_dist=15,
+                                     max_dist=50, max_gap=10, min_track_len=3,
+                                     merge_area_thresh=1.8, n_cells=None,
+                                     roi_cx=None, roi_cy=None, roi_r=None):
+    """
+    --exp_dir entry point for one already-loaded RoboCam well (see
+    robocam_input.WellFrames). There is no pre-existing encoded source
+    video to hand to ffmpeg, so the lazily-debayered BGR frames are piped
+    into ffmpeg's first input over stdin instead of a file path — same
+    overlay filter graph as the --video path otherwise.
+    """
+    height, width = wf.height, wf.width
+    circle_mask, _roi_cx, _roi_cy = _build_roi(height, width, roi_cx, roi_cy, roi_r)
+
+    corrected_frame_tracks = _process_frames(
+        wf.frames_gray, height, width, circle_mask,
+        blur_ksize=blur_ksize, min_area=min_area, peak_min_dist=peak_min_dist,
+        max_dist=max_dist, max_gap=max_gap, min_track_len=min_track_len,
+        merge_area_thresh=merge_area_thresh, n_cells=n_cells,
+    )
+
+    write_tracks_csv(corrected_frame_tracks, output_csv)
+
+    render_overlay_frames(corrected_frame_tracks, height, width, temp_dir,
+                          circle_mask, _roi_cx, _roi_cy, roi_r)
+
+    frame_count = len(corrected_frame_tracks)
+    overlay_pattern = os.path.join(temp_dir, "frame_%05d.png")
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "rawvideo", "-pix_fmt", "bgr24",
+        "-s", f"{width}x{height}",
+        "-r", str(wf.fps),
+        "-i", "-",
+        "-r", str(wf.fps),
+        "-i", overlay_pattern,
+        "-filter_complex", "[1]format=rgba[ovr];[0][ovr]overlay",
+        "-c:v", "libx264",
+        overlay_video,
+    ]
+    raw_bytes = b"".join(wf.get_bgr(i).tobytes() for i in range(frame_count))
+    subprocess.run(cmd, input=raw_bytes, check=True)
+    print(f"Saved overlay → {overlay_video}")
+
+
+def run_exp_dir(exp_dir, **kwargs):
+    """
+    Batch entry point: process every well found under <exp_dir>/raw/,
+    writing per-well CSV + overlay outputs to <exp_dir>/tracking/.
+    """
+    wells = ri.discover_wells(exp_dir)
+    tracking_dir = os.path.join(exp_dir, "tracking")
+    os.makedirs(tracking_dir, exist_ok=True)
+
+    for well, exp_ts, metadata_path in wells:
+        wf = ri.load_well_frames(exp_dir, well, exp_ts, metadata_path)
+        if wf is None:
+            print(f"  [skip] {well} has 0 captured frames")
+            continue
+
+        print(f"=== Well {well} ({wf.frames_gray.shape[0]} frames) ===")
+        output_csv    = os.path.join(tracking_dir, f"{well}_{exp_ts}_tracks.csv")
+        overlay_video = os.path.join(tracking_dir, f"{well}_{exp_ts}_overlay.mp4")
+        temp_dir      = os.path.join(tracking_dir, f".overlay_tmp_{well}_{exp_ts}")
+
+        try:
+            detect_and_label_from_wellframes(
+                wf, output_csv, overlay_video, temp_dir, **kwargs
+            )
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -1104,8 +1257,16 @@ if __name__ == "__main__":
                     "sweep that fills gaps, removes noise, and splits merged blobs. "
                     "Use debug_frame1.py to tune detection parameters first."
     )
-    parser.add_argument("--video",             required=True)
-    parser.add_argument("--overlay",           required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--video",   help="Single input video file")
+    source.add_argument("--exp_dir",
+                        help="RoboCam 3.1 experiment directory — reads "
+                             "raw/*.npy directly and batches every well found")
+    parser.add_argument("--output",            default=None,
+                        help="Output CSV path, columns frame,track_id,x,y,"
+                             "correction,contour (--video mode only; --exp_dir "
+                             "auto-derives per-well paths under <exp_dir>/tracking/)")
+    parser.add_argument("--overlay",           help="Output overlay video path (--video mode only)")
     parser.add_argument("--blur_ksize",        type=int,   default=5,
                         help="Gaussian blur kernel before Otsu (default: 5).")
     parser.add_argument("--min_area",          type=int,   default=200,
@@ -1139,9 +1300,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    detect_and_label(
-        video_path        = args.video,
-        overlay_video     = args.overlay,
+    tuning_kwargs = dict(
         blur_ksize        = args.blur_ksize,
         min_area          = args.min_area,
         peak_min_dist     = args.peak_min_dist,
@@ -1154,3 +1313,18 @@ if __name__ == "__main__":
         roi_cy            = args.roi_cy,
         roi_r             = args.roi_r,
     )
+
+    if args.video:
+        if not args.overlay:
+            parser.error("--overlay is required with --video")
+        detect_and_label(
+            video_path    = args.video,
+            overlay_video = args.overlay,
+            output_csv    = args.output,
+            **tuning_kwargs,
+        )
+    else:
+        if args.output or args.overlay:
+            parser.error("--output/--overlay are not used with --exp_dir — "
+                         "per-well paths are auto-derived under <exp_dir>/tracking/")
+        run_exp_dir(args.exp_dir, **tuning_kwargs)
