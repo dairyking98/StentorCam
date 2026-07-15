@@ -37,6 +37,13 @@ as the action spectrum.
 
 - Y-axis label: "Relative response." Y-axis units are actually the **fluence rate (W/m^2)**
   needed to hit 0.58 mm/s — same scale as the x-axis of Fig. 2a (log, ~0.1–1.0+ W/m^2).
+- **Where "W/m^2" comes from:** Fig. 3's own axis and caption never print a unit — the
+  caption only says "the fluence rate of monochromatic light... was determined." The W/m^2
+  unit is confirmed indirectly, from Fig. 2's intensity-axis labels ("0.1 W/m^2 (400 nm)",
+  "0.5 W/m^2 (400 nm)", "1.0 W/m^2 (400 nm)" per the OCR'd PDF text), which measure the same
+  quantity (fluence rate of monochromatic light) over the same ~0.1-1.0+ numeric range as
+  Fig. 3's y-axis. So the unit is inferred by matching quantities across figures, not read
+  directly off Fig. 3.
 - The axis is drawn **inverted** (small numbers near the top, large numbers near the
   bottom). This is a standard action-spectrum convention: the biologically meaningful
   quantity is *sensitivity* = 1/fluence needed, not the fluence itself. Rather than plot
