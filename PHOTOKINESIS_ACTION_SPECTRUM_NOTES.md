@@ -18,11 +18,7 @@ Source: Iwatsuki, K. (1992). *Stentor coeruleus* shows positive photokinesis.
 
 ## Figure 3
 
-![Figure 3. Action spectrum for photokinesis in S. coeruleus.](references/iwatsuki-1992-figure3-action-spectrum.png)
-
-> **Figure 3. Action spectrum for photokinesis in *S. coeruleus*.** The fluence rate of
-> monochromatic light at nine different wavelengths which gave the half-maximal kinetic
-> response (0.58 mm/s) was determined to obtain the action spectrum.
+![](references/iwatsuki-1992-figure3-action-spectrum.png){width=100%}
 
 ## How Figure 3 (action spectrum) was built
 
