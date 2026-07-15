@@ -16,6 +16,14 @@ Source: Iwatsuki, K. (1992). *Stentor coeruleus* shows positive photokinesis.
 - *S. coeruleus* is reported as the first protozoan shown to exhibit all three
   photoresponse types: photophobic response, phototaxis, and photokinesis.
 
+## Figure 3
+
+![Figure 3. Action spectrum for photokinesis in S. coeruleus.](references/iwatsuki-1992-figure3-action-spectrum.png)
+
+> **Figure 3. Action spectrum for photokinesis in *S. coeruleus*.** The fluence rate of
+> monochromatic light at nine different wavelengths which gave the half-maximal kinetic
+> response (0.58 mm/s) was determined to obtain the action spectrum.
+
 ## How Figure 3 (action spectrum) was built
 
 For each of 9 wavelengths (400–720 nm), the authors measured a full fluence-rate vs.
@@ -31,8 +39,8 @@ as the action spectrum.
 
 ### Reading the y-axis: logarithmic AND inverted
 
-- Y-axis label: "Relative response." Y-axis units are actually the **fluence rate (W/m²)**
-  needed to hit 0.58 mm/s — same scale as the x-axis of Fig. 2a (log, ~0.1–1.0+ W/m²).
+- Y-axis label: "Relative response." Y-axis units are actually the **fluence rate (W/m^2)**
+  needed to hit 0.58 mm/s — same scale as the x-axis of Fig. 2a (log, ~0.1–1.0+ W/m^2).
 - The axis is drawn **inverted** (small numbers near the top, large numbers near the
   bottom). This is a standard action-spectrum convention: the biologically meaningful
   quantity is *sensitivity* = 1/fluence needed, not the fluence itself. Rather than plot
@@ -42,14 +50,14 @@ as the action spectrum.
 
 ### Specific values discussed
 
-- **680 nm → ~0.08 W/m²** needed to reach 0.58 mm/s (near the top of the plot — most
+- **680 nm to ~0.08 W/m^2** needed to reach 0.58 mm/s (near the top of the plot — most
   sensitive point tested).
-- **400 nm → ~1.1 W/m²** needed to reach 0.58 mm/s (near the bottom — least sensitive
+- **400 nm to ~1.1 W/m^2** needed to reach 0.58 mm/s (near the bottom — least sensitive
   point tested).
-- Ratio ≈ **14×** — Stentor needs roughly 14 times less red (680 nm) light than blue
+- Ratio ~= **14x** — Stentor needs roughly 14 times less red (680 nm) light than blue
   (400 nm) light to produce the same swimming-speed increase. This is a genuine, strong
   action-spectrum peak at 680 nm, not just a mild bias.
-- Curve shape across the spectrum: steep rise from 400→440 nm, a plateau through
+- Curve shape across the spectrum: steep rise from 400–440 nm, a plateau through
   ~440–600 nm, then a second climb to the true peak at 680 nm, followed by a drop at
   720 nm.
 
@@ -67,7 +75,7 @@ wrong, for two reasons:
    projected..."). There's no separate viewing-light channel, so they can't record a cell
    swimming in literal darkness.
 2. **No plateau is described.** Both Fig. 1a (white light, 100–50000 lx) and Fig. 2a
-   (monochromatic, ~0.1–2 W/m²) are described as "increased almost linearly with a
+   (monochromatic, ~0.1–2 W/m^2) are described as "increased almost linearly with a
    logarithmic increase" across the *entire* tested range — no floor/ceiling saturation
    is mentioned, so there's no natural min/max to average.
 
