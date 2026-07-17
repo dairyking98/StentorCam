@@ -35,7 +35,8 @@ at 680 nm.
 
 Source: Iwatsuki, K. (1992). *Stentor coeruleus* shows positive photokinesis.
 *Photochemistry and Photobiology*, 55(3), 469-471.
-(PDF: [`references/Iwatsuki-1992-Stentor-coeruleus-positive-photokinesis.pdf`](references/Iwatsuki-1992-Stentor-coeruleus-positive-photokinesis.pdf))
+(PDF kept in a local reference library, not committed here — see
+`WAVELENGTH_SELECTION_GUIDE.md` Source Status for why)
 
 - Mean swimming velocity ~0.6 mm/s at 100 lx, up to ~1.0 mm/s at 50000 lx (white light).
 - Velocity increases roughly **linearly with log(fluence rate)** — a Weber-Fechner-type

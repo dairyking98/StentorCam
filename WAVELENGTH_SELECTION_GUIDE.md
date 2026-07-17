@@ -163,19 +163,22 @@ tested range was ~0.1-1.1 W/m^2, and Kuhnel-Kratz & Hader saw kinesis disappear 
 
 | Paper | Status |
 |---|---|
-| Iwatsuki 1992 | In `references/` |
+| Iwatsuki 1992 | Local reference library (not committed — copyright), values verified |
 | Wood 1976 | Local reference library (not committed — copyright), values verified |
 | Song 1980 | Local reference library (not committed — copyright), values verified |
 | Kuhnel-Kratz & Hader 1994 | Local reference library (not committed — copyright), read — no wavelength data |
 | Kim/Prusti/Song/Hader 1984 | Local reference library (not committed — copyright, ILL came through), values verified |
 
-Full-text PDFs for Wood 1976, Song 1980, Kim/Prusti/Song/Hader 1984, and Kuhnel-Kratz
-& Hader 1994 are kept outside this repo (in a local reference library) rather than
-committed, since their access terms (ILL cover sheets with an explicit "no further
-copies, electronic or paper" restriction) don't permit redistribution. Iwatsuki 1992's
-PDF has no such cover-sheet notice, but it's still a copyrighted journal article and
-was already committed to this repo (and pushed to the public fork) in an earlier
-session before this concern came up — worth flagging to the PI as well, since the same
-question applies to it. Every value we cite from the other four papers has been
-independently re-verified against the primary-source PDF text before being written
-into these docs, even though the PDFs themselves live outside the repo.
+Full-text PDFs for all five papers above are kept outside this repo (in a local
+reference library) rather than committed. Wood 1976, Song 1980, Kim/Prusti/Song/Hader
+1984, and Kuhnel-Kratz & Hader 1994 came with ILL cover sheets with an explicit "no
+further copies, electronic or paper" restriction that doesn't permit redistribution.
+Iwatsuki 1992's PDF has no such cover-sheet notice, but it's still a copyrighted
+journal article — it was committed to this repo and pushed to the public fork earlier
+in this project before this concern came up; that commit has since been removed from
+history and force-pushed, and the PDF moved to the same local reference library as the
+others. Every value we cite from all five papers has been independently re-verified
+against the primary-source PDF text before being written into these docs, even though
+the PDFs themselves live outside the repo. The derived Figure 3 crop image
+(`references/iwatsuki-1992-figure3-action-spectrum.png`) is still committed, since it's
+a small excerpt used for commentary/critique rather than the full paper.
