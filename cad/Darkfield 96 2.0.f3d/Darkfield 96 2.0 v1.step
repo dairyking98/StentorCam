@@ -9,8 +9,8 @@ FILE_DESCRIPTION(
 /* implementation_level */ '2;1');
 
 FILE_NAME(
-/* name */ 'Darkfield 96 2.0 v1.stp',
-/* time_stamp */ '2026-06-16T14:16:56-07:00',
+/* name */ 'Darkfield 96 2.0_v1.step',
+/* time_stamp */ '2026-10-04T11:14:22-07:00',
 /* author */ (''),
 /* organization */ (''),
 /* preprocessor_version */ 'ST-DEVELOPER v20.1',

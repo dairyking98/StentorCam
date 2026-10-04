@@ -1,9 +1,8 @@
 # CAD reference files
 
 Fusion 360 export bundles for StentorCam hardware, kept here for reference.
-Each `<name>.f3d/` folder holds the source `.f3d` plus derived exports
-(`.stl`, `.step`/`.stp`, and in some cases `.igs`, per-body STLs, and sketch
-DXFs). The version number in the export filenames is the Fusion design
+Each `<name>.f3d/` folder holds the source `.f3d` plus `.step` and `.stl`
+exports. The version number in the export filenames is the Fusion design
 version.
 
 - **`StentorCam Base.f3d`** — Holds the IR light plate to the printer's
