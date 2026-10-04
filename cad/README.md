@@ -1,9 +1,10 @@
 # CAD reference files
 
 Fusion 360 export bundles for StentorCam hardware, kept here for reference.
-Each `<name>.f3d/` folder is a raw Fusion export: the source `.f3d`, derived
-`.igs`/`.stl`/`.stp` files, and a version-numbered subfolder with per-body
-STLs and sketch DXFs.
+Each `<name>.f3d/` folder holds the source `.f3d` plus derived exports
+(`.stl`, `.step`/`.stp`, and in some cases `.igs`, per-body STLs, and sketch
+DXFs). The version number in the export filenames is the Fusion design
+version.
 
 - **`StentorCam Base.f3d`** — Holds the IR light plate to the printer's
   build plate using two sprung fingers, improving repeatability when
@@ -14,7 +15,9 @@ STLs and sketch DXFs.
   small/medium C-mount lens to attach. Further mods may be needed for
   different lens arrangements; may get updated to be parametric. Specific to
   the Ender 5 S1's mounting arrangement — other printers will need a
-  redesign.
+  redesign. Current version: v20.
+- **`LED Tube.f3d`** — LED tube for StentorCam illumination. Current
+  version: v13.
 - **`T2 male to C female.f3d`** — Astrophotography T2-male-to-C-mount
   adapter, with focal plane positioning appropriate for a C-mount lens.
   Print on a Bambu X1C with highest layer precision and random seams.
