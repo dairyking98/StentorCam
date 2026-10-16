@@ -21,13 +21,16 @@ the references) if there is one, otherwise just the `.step`/`.stl`.
   different lens arrangements; may get updated to be parametric. Specific to
   the Ender 5 S1's mounting arrangement — other printers will need a
   redesign. Current version: v20. Fusion source is the `.f3z` only (the
-  `.f3d` relied on external geometry).
+  `.f3d` relied on external geometry). Opening the `.f3z` also imports the
+  LED Tube design into Fusion, since the mount references it.
 - **`StentorCam_PlayerOne/`** — StentorCam Player One camera part.
   Current version: v3.
 - **`LED_Tube/`** — LED tube for StentorCam illumination. The design
   has two separate bodies: the tube and an aperture that threads into the
-  tube. Print them as separate parts. Current version: v13. `.step`/`.stl`
-  only (the `.f3d` relied on external geometry).
+  tube. Print them as separate parts. Current version: v13. No standalone
+  `.f3d` here: the editable Fusion design is bundled in the lens mount's
+  `.f3z` (`StentorCam_Lens_Mount_Ender_PlayerOne/`) and imports into Fusion
+  when you open that.
 - **`T2_male_to_C_female/`** — Astrophotography T2-male-to-C-mount
   adapter, with focal plane positioning appropriate for a C-mount lens.
   Print on a Bambu X1C with highest layer precision and random seams.
