@@ -21,8 +21,10 @@ number in the export filenames is the Fusion design version.
   those references.
 - **`StentorCam PlayerOne.f3d`** — StentorCam Player One camera part.
   Current version: v3.
-- **`LED Tube.f3d`** — LED tube for StentorCam illumination. Only the
-  `.step`/`.stl` exports (v13) are kept; the Fusion source isn't included.
+- **`LED Tube.f3d`** — LED tube for StentorCam illumination. The design
+  has two separate bodies: the tube and an aperture that threads into the
+  tube. Print them as separate parts. Only the `.step`/`.stl` exports (v13)
+  are kept; the Fusion source isn't included.
 - **`T2 male to C female.f3d`** — Astrophotography T2-male-to-C-mount
   adapter, with focal plane positioning appropriate for a C-mount lens.
   Print on a Bambu X1C with highest layer precision and random seams.
