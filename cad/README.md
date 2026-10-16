@@ -15,10 +15,12 @@ version.
   different lens arrangements; may get updated to be parametric. Specific to
   the Ender 5 S1's mounting arrangement — other printers will need a
   redesign. Current version: v20.
+  **Use the `.f3z` in this folder, not the `.f3d`.** The design references
+  external geometry (linked components), which the standalone `.f3d` doesn't
+  carry, so it won't open correctly on its own. The `.f3z` archive bundles
+  those references.
 - **`StentorCam PlayerOne.f3d`** — StentorCam Player One camera part.
   Current version: v3.
-- **`LED Tube.f3d`** — LED tube for StentorCam illumination. Current
-  version: v13.
 - **`T2 male to C female.f3d`** — Astrophotography T2-male-to-C-mount
   adapter, with focal plane positioning appropriate for a C-mount lens.
   Print on a Bambu X1C with highest layer precision and random seams.
