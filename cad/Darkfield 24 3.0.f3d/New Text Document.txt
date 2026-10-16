@@ -1,2 +1,0 @@
-circle dia 21mm now
-then 22
